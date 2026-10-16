@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Window opener — anatomy</title>
+<style>
+  :root { --bg:#f3f1ec; --ink:#1d1d1d; --accent:#c4704f; --muted:#7a766e; --card:#fff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family:-apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width:980px; margin:0 auto; padding:18px 14px 40px; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  .tag { font-family:ui-monospace, Consolas, monospace; background:var(--ink); color:#fff;
+         padding:5px 10px; border-radius:6px; font-size:14px; }
+  .tag b { color:var(--accent); font-weight:600; margin-right:8px; }
+  .dots { display:flex; gap:6px; }
+  .dots span { width:28px; height:5px; border-radius:3px; background:#d9d5cc; }
+  .dots span.on { background:var(--accent); }
+  h1 { font-size:22px; margin:14px 0 4px; }
+  .sub { color:var(--muted); font-size:14px; margin:0 0 12px; }
+  .tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:12px 0; }
+  .tabs button { border:1.5px solid #d9d5cc; background:var(--card); border-radius:10px; padding:10px 6px;
+                 font-size:14px; font-weight:600; cursor:pointer; color:var(--ink); }
+  .tabs button small { display:block; font-weight:400; color:var(--muted); font-size:12px; margin-top:2px; }
+  .tabs button.on { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset; }
+  svg { width:100%; height:auto; display:block; background:var(--bg); }
+  svg text { font-family:-apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .part { cursor:pointer; }
+  .part.sel { filter:drop-shadow(0 0 4px var(--accent)); }
+  .ctrl { background:var(--card); border-radius:14px; padding:12px 16px; margin:8px 0;
+          display:flex; align-items:center; gap:14px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .ctrl label { font-weight:700; min-width:96px; font-size:15px; }
+  .ctrl input[type=range] { flex:1; accent-color:var(--accent); height:28px; min-width:0; }
+  @media (max-width:640px){ .ctrl { padding:10px 12px; gap:10px; } .ctrl label { min-width:72px; font-size:14px; } h1 { font-size:19px; } }
+  .ctrl button { background:var(--ink); color:#fff; border:0; border-radius:8px; padding:8px 14px;
+                 font-family:ui-monospace, Consolas, monospace; font-size:14px; cursor:pointer; }
+  .card { background:var(--card); border-radius:14px; padding:14px 16px; margin:10px 0;
+          box-shadow:0 1px 3px rgba(0,0,0,.08); font-size:15px; line-height:1.45; }
+  .card h3 { margin:0 0 6px; font-size:16px; }
+  .card .k { color:var(--accent); font-weight:700; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media (max-width:640px){ .grid2 { grid-template-columns:1fr; } .tabs { grid-template-columns:repeat(2,1fr); } }
+  ul { margin:4px 0 0; padding-left:20px; }
+  .note { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="tag"><b id="num">1/4</b><span id="tagname">belt-loop</span></div>
+    <div class="dots" id="dots"></div>
+  </div>
+  <h1>Dining window opener: four ways to build it</h1>
+  <p class="sub">Viewed from inside. The right panel slides left. Drag <b>Open</b> to see it work and <b>Pull apart</b> to see the parts. Tap any part for what it does.</p>
+
+  <div class="tabs" id="tabs"></div>
+
+  <svg id="svg" viewBox="0 0 1000 780" aria-label="Window opener diagram"></svg>
+
+  <div class="ctrl">
+    <label for="open">Open</label>
+    <input id="open" type="range" min="0" max="1000" value="0">
+    <button id="play">▶ play</button>
+  </div>
+  <div class="ctrl">
+    <label for="explode">Pull apart</label>
+    <input id="explode" type="range" min="0" max="1000" value="0">
+  </div>
+
+  <div class="card" id="info"><h3>Tap a part</h3>Tap anything in the drawing to see what it does.</div>
+
+  <div class="card">
+    <h3 id="dname"></h3>
+    <div id="dhow"></div>
+    <div class="grid2" style="margin-top:8px">
+      <div><span class="k">Good</span><ul id="dgood"></ul></div>
+      <div><span class="k">Watch out</span><ul id="dbad"></ul></div>
+    </div>
+  </div>
+
+  <p class="note">A sketch, not a build drawing. The width (≈60 in) comes from your tape photos. The opening (≈28 in) is an <b>estimate</b>, because the full-open gap hasn't been measured yet. No design is picked yet, and nothing gets bought until you choose one. The good and watch-out notes are my judgment, not test results.</p>
+</div>
+
+<script>
+const PX = 13;                 // px per inch
+const SASH_X0 = 492, SASH_W = 382, TRAVEL = 364;   // 28 in est.
+const OPEN_SW = 214, CLOSED_SW = 620;
+const ACC = '#c4704f', INK = '#1d1d1d', GLASS = '#dfe9ee';
+const rowY = i => 440 + i * 48;
+
+let state = { d: 0, t: 0, e: 0, sel: null };
+
+function controller(withWire, wireTo) {
+  return (withWire ? `<path d="M796 378 L${wireTo} 378" stroke="#555" stroke-width="2.5" fill="none"/>` : '') +
+    `<rect x="796" y="344" width="76" height="36" rx="5" fill="${INK}"/>
+     <text x="834" y="367" fill="#fff" font-size="13" text-anchor="middle" font-family="Consolas,monospace">ESP32</text>`;
+}
+const CTRL_DESC = 'A small Wi-Fi board (ESP32) plus a motor driver, in a box with screw terminals, so no soldering. It talks to Home Assistant over Wi-Fi with no cloud, runs the motor, reads the position, and stops on a jam. Powered by a plug-in adapter at the baseboard.';
+
+function switches(t) {
+  const on1 = t > 0.985, on2 = t < 0.015;
+  const sw = (x, on) => `<rect x="${x-6}" y="382" width="12" height="9" rx="2" fill="${on ? ACC : '#9a958c'}" stroke="${INK}" stroke-width="1.2"/>`;
+  return sw(OPEN_SW, on1) + sw(CLOSED_SW, on2);
+}
+const SW_DESC = 'Two small switches, one at fully closed and one at fully open. The window physically presses them, so "closed" means the window really is closed. They also cut the motor at the end of travel even if the software misbehaves.';
+
+function bracket(A, top) {
+  return `<rect x="${A-15}" y="${top}" width="30" height="6" fill="${INK}"/>
+          <rect x="${A-4}" y="${top}" width="8" height="${352-top}" fill="${INK}"/>`;
+}
+
+const DESIGNS = [
+  { key:'belt-loop', name:'Belt loop', sub:'gear motor + belt',
+    how:'A motor at the left end turns a toothed rubber belt that loops around a wheel at the far end. A clamp on the belt is bolted to the window, so when the belt moves, the window moves.',
+    good:['Slim. Fits a 4 in sill.','Full travel, any position.','A worm-gear motor holds the window shut with the power off.','Cheap, common parts.'],
+    bad:['Belt tension has to be set once.','A worm gear locks, so you can\'t push the window by hand unless the clamp has a quick release.'],
+    parts: [
+      { k:'channel', n:'Cover channel', row:5, cy:365, lx:()=>668,
+        d:'A slim aluminum channel screwed to the sill. It holds everything in line and hides the belt.',
+        svg:()=>`<rect x="192" y="348" width="462" height="34" rx="3" fill="#faf8f4" stroke="#a9a49a" stroke-width="1.5" stroke-dasharray="5 3"/>` },
+      { k:'motor', n:'Gear motor + encoder', row:0, cy:360, lx:()=>222,
+        d:'A small 12 V motor with a worm gearbox. The worm gear is strong and slow, and it can\'t be back-driven, so it holds the window wherever it stops. The encoder counts turns, which gives the exact position at any point.',
+        svg:()=>`<rect x="128" y="348" width="9" height="24" fill="${INK}"/>
+                 <rect x="136" y="340" width="52" height="40" rx="4" fill="${ACC}" stroke="${INK}" stroke-width="2"/>
+                 <line x1="188" y1="366" x2="200" y2="366" stroke="${INK}" stroke-width="3"/>
+                 <circle cx="200" cy="366" r="10" fill="#fff" stroke="${INK}" stroke-width="2"/>` },
+      { k:'belt', n:'Toothed belt', row:1, cy:366, lx:()=>660,
+        d:'A rubber belt with teeth, like a car\'s timing belt but small. It can\'t slip on the motor wheel, so every motor turn moves the window the same distance.',
+        svg:(A)=>{ const off = ((A % 10) + 10) % 10;
+          return `<path d="M200 356 L640 356 A10 10 0 0 1 640 376 L200 376 A10 10 0 0 1 200 356 Z" fill="none" stroke="${INK}" stroke-width="3"/>
+                  <path d="M200 356 L640 356" stroke="#fff" stroke-width="1.2" stroke-dasharray="3 7" stroke-dashoffset="${-off}"/>`; } },
+      { k:'idler', n:'Idler wheel', row:2, cy:366, lx:()=>676,
+        d:'A free-spinning wheel at the far end that the belt loops around. Its mount slides to tighten the belt.',
+        svg:()=>`<rect x="648" y="352" width="16" height="28" fill="#cfcac0" stroke="${INK}" stroke-width="1.5"/>
+                 <circle cx="640" cy="366" r="10" fill="#fff" stroke="${INK}" stroke-width="2"/>` },
+      { k:'clamp', n:'Belt clamp + window bracket', row:3, cy:345, lx:(A)=>A+26,
+        d:'Grips the belt, and an L-bracket screws into the bottom of the sliding panel\'s aluminum frame. It\'s the only part that touches the window.',
+        svg:(A)=>`<rect x="${A-16}" y="350" width="32" height="12" fill="${INK}"/>` + bracket(A, 326) },
+      { k:'switches', n:'End switches', row:4, cy:387, lx:()=>640, d:SW_DESC, svg:(A,t)=>switches(t) },
+      { k:'ctrl', n:'Controller', row:6, cy:363, lx:()=>786, left:true, d:CTRL_DESC, svg:()=>controller(true, 188) },
+    ]},
+  { key:'lead-screw', name:'Lead screw', sub:'threaded rod',
+    how:'A motor spins a long threaded rod. A nut rides on the rod, and since the nut can\'t turn, it walks along the rod and pulls the window with it. Same idea as Glasscalibur, the closest existing kit.',
+    good:['Very strong and precise.','Holds position with no power.','Proven idea (Glasscalibur).'],
+    bad:['A ~30 in rod wobbles at speed, so it either runs slow or needs a support in the middle.','Slowest of the four.','No pushing by hand.'],
+    parts: [
+      { k:'rod', n:'Guide rod', row:5, cy:350, lx:()=>668,
+        d:'A smooth rod above the screw. It keeps the nut from twisting, so the screw only has to push.',
+        svg:()=>`<line x1="198" y1="350" x2="652" y2="350" stroke="#8b867c" stroke-width="3"/>` },
+      { k:'motor', n:'Stepper motor', row:0, cy:362, lx:()=>222,
+        d:'A stepper motor moves in small fixed steps, so the controller knows the position by counting them. A coupler joins it to the rod.',
+        svg:()=>`<rect x="136" y="344" width="52" height="36" rx="4" fill="${ACC}" stroke="${INK}" stroke-width="2"/>
+                 <rect x="188" y="358" width="12" height="16" fill="#cfcac0" stroke="${INK}" stroke-width="1.5"/>` },
+      { k:'screw', n:'Threaded rod (lead screw)', row:1, cy:366, lx:()=>676,
+        d:'About 30 in of threaded rod. Each turn moves the nut a fixed amount. It\'s long for its thickness, which is why it can wobble when spun fast.',
+        svg:(A)=>{ const ph = ((A % 7) + 7) % 7; let s = `<rect x="200" y="361" width="450" height="10" fill="#e4e0d8" stroke="${INK}" stroke-width="1.5"/>`;
+          for (let x = 200 + ph; x < 646; x += 7) s += `<line x1="${x}" y1="361" x2="${x+4}" y2="371" stroke="#6d685f" stroke-width="1.2"/>`;
+          return s; } },
+      { k:'bearing', n:'End bearing', row:2, cy:365, lx:()=>676,
+        d:'Holds the far end of the rod so it spins freely and stays straight.',
+        svg:()=>`<rect x="650" y="348" width="16" height="32" fill="#cfcac0" stroke="${INK}" stroke-width="1.5"/>` },
+      { k:'nut', n:'Nut carriage + window bracket', row:3, cy:345, lx:(A)=>A+26,
+        d:'The nut rides the rod. An L-bracket screws into the bottom of the sliding panel\'s frame.',
+        svg:(A)=>`<rect x="${A-16}" y="344" width="32" height="32" rx="3" fill="${INK}"/>` + bracket(A, 326) },
+      { k:'switches', n:'End switches', row:4, cy:387, lx:()=>640, d:SW_DESC, svg:(A,t)=>switches(t) },
+      { k:'ctrl', n:'Controller', row:6, cy:363, lx:()=>786, left:true, d:CTRL_DESC, svg:()=>controller(true, 188) },
+    ]},
+  { key:'rack', name:'Rack & pinion', sub:'motor rides the window',
+    how:'A toothed strip (the rack) is screwed to the sill. The motor is bolted to the window with a small gear (the pinion) meshing into the strip, so the motor walks itself and the window along.',
+    good:['Simple, nothing long spinning.','Wider window = a longer strip, nothing else changes. Good for a kit.','Worm motor holds position.'],
+    bad:['Motor and its cable move with the window: more to snag, and the cable flexes every time.','The window carries the motor\'s weight.'],
+    parts: [
+      { k:'rack', n:'Gear rack', row:1, cy:372, lx:()=>660,
+        d:'A straight strip with gear teeth, screwed to the sill. It doesn\'t move. It\'s the "road" the motor drives along.',
+        svg:()=>{ let z = 'M196 370'; for (let x = 196; x < 644; x += 8) z += ` L${x+4} 364 L${x+8} 370`;
+          return `<rect x="196" y="370" width="448" height="10" fill="#e4e0d8" stroke="${INK}" stroke-width="1.5"/><path d="${z}" fill="none" stroke="${INK}" stroke-width="1.5"/>`; } },
+      { k:'motor', n:'Gear motor + encoder + pinion', row:0, cy:340, lx:(A)=>A+30,
+        d:'Same worm-gear motor as the belt design, but bolted to the window\'s bottom frame. The small gear on its shaft meshes with the rack. The encoder counts turns for position.',
+        svg:(A)=>{ const ang = (-A / 9) * 57.3;
+          return bracket(A, 312) + `<rect x="${A-18}" y="318" width="36" height="34" rx="4" fill="${ACC}" stroke="${INK}" stroke-width="2"/>
+                 <g transform="rotate(${ang.toFixed(1)} ${A} 360)"><circle cx="${A}" cy="360" r="9" fill="#fff" stroke="${INK}" stroke-width="2"/>
+                 <line x1="${A-9}" y1="360" x2="${A+9}" y2="360" stroke="${INK}" stroke-width="1.5"/><line x1="${A}" y1="351" x2="${A}" y2="369" stroke="${INK}" stroke-width="1.5"/></g>`; } },
+      { k:'cable', n:'Moving cable', row:2, cy:345, lx:()=>800,
+        d:'The motor moves, so its wire has to flex along with it. Usually it runs in a plastic drag chain so it folds neatly. This is the weak spot of the design.',
+        svg:(A)=>`<path d="M${A+18} 334 C${A+120} 334, 740 318, 800 352" fill="none" stroke="#555" stroke-width="3" stroke-dasharray="7 3"/>` },
+      { k:'switches', n:'End switches', row:4, cy:387, lx:()=>640, d:SW_DESC, svg:(A,t)=>switches(t) },
+      { k:'ctrl', n:'Controller', row:6, cy:363, lx:()=>786, left:true, d:CTRL_DESC, svg:()=>controller(false) },
+    ]},
+  { key:'linear-stage', name:'Linear stage', sub:'buy it assembled',
+    how:'Buy a ready-made motorized rail: an aluminum bar with a belt inside and a sliding plate on top. Screw the bar to the sill and bolt the plate to the window. It\'s the belt design, already assembled.',
+    good:['Least building. It comes straight and aligned.','Mounts for the end switches are usually built in.'],
+    bad:['Bulkiest. Has to be checked against LR1\'s 4 in sill.','Long ones (~800 mm travel) cost more.','Usually stepper-driven, which doesn\'t hold the window with the power off.'],
+    parts: [
+      { k:'motor', n:'Stepper motor', row:0, cy:363, lx:()=>160,
+        d:'Mounted on the end of the rail and turns the belt inside it. Steppers move in counted steps, so the position is known.',
+        svg:()=>`<rect x="102" y="346" width="48" height="34" rx="4" fill="${ACC}" stroke="${INK}" stroke-width="2"/>` },
+      { k:'body', n:'Rail (aluminum body)', row:1, cy:365, lx:()=>690,
+        d:'An extruded aluminum bar with a belt and pulleys sealed inside. It\'s the frame of the whole thing.',
+        svg:(A)=>{ const off = ((A % 10) + 10) % 10;
+          return `<rect x="150" y="350" width="530" height="30" rx="3" fill="#ebebeb" stroke="${INK}" stroke-width="2"/>
+                  <rect x="150" y="350" width="14" height="30" fill="#cfcac0" stroke="${INK}" stroke-width="1.5"/><rect x="666" y="350" width="14" height="30" fill="#cfcac0" stroke="${INK}" stroke-width="1.5"/>
+                  <line x1="170" y1="365" x2="660" y2="365" stroke="#9a958c" stroke-width="1.5" stroke-dasharray="3 7" stroke-dashoffset="${-off}"/>`; } },
+      { k:'carriage', n:'Carriage plate + window bracket', row:3, cy:340, lx:(A)=>A+30,
+        d:'The plate rides on top of the rail. An L-bracket connects it to the bottom of the sliding panel\'s frame.',
+        svg:(A)=>`<rect x="${A-24}" y="342" width="48" height="10" rx="2" fill="${INK}"/>` + bracket(A, 326) },
+      { k:'switches', n:'End switches', row:4, cy:387, lx:()=>640, d:SW_DESC, svg:(A,t)=>switches(t) },
+      { k:'ctrl', n:'Controller', row:6, cy:363, lx:()=>786, left:true, d:CTRL_DESC, svg:()=>controller(true, 150) },
+    ]},
+];
+
+function windowSVG(sx, e) {
+  const fade = (1 - e * 0.55).toFixed(2);
+  const grids = (x, y, w, h) => `<line x1="${x+w/3}" y1="${y}" x2="${x+w/3}" y2="${y+h}" stroke="#b9c7cf" stroke-width="2"/>
+     <line x1="${x+2*w/3}" y1="${y}" x2="${x+2*w/3}" y2="${y+h}" stroke="#b9c7cf" stroke-width="2"/>
+     <line x1="${x}" y1="${y+h/2}" x2="${x+w}" y2="${y+h/2}" stroke="#b9c7cf" stroke-width="2"/>`;
+  const gapIn = Math.round((874 - (sx + SASH_W)) / PX);
+  let s = `<g opacity="${fade}">
+    <rect x="110" y="40" width="780" height="340" fill="#fff" stroke="${INK}" stroke-width="3"/>
+    <rect x="126" y="56" width="380" height="308" fill="${GLASS}" stroke="${INK}" stroke-width="2"/>${grids(126,56,380,308)}
+    <rect x="506" y="56" width="368" height="308" fill="url(#mesh)" stroke="#bbb"/>
+    <rect x="${sx}" y="52" width="${SASH_W}" height="316" fill="#fff" stroke="${INK}" stroke-width="2.5"/>
+    <rect x="${sx+12}" y="64" width="${SASH_W-24}" height="292" fill="${GLASS}" stroke="${INK}" stroke-width="1.5"/>${grids(sx+12,64,SASH_W-24,292)}
+    <text x="316" y="215" font-size="15" fill="#6b7a83" text-anchor="middle">fixed panel</text>
+    <text x="${sx+SASH_W/2}" y="215" font-size="15" fill="#6b7a83" text-anchor="middle">sliding panel</text>
+    <rect x="70" y="380" width="860" height="18" fill="#ebe6dc" stroke="${INK}" stroke-width="2"/>
+    <text x="668" y="394" font-size="11" fill="${'#8b867c'}">sill (dining ≈7 in deep · LR1 ≈4 in)</text>
+    <rect x="936" y="404" width="20" height="30" rx="3" fill="#fff" stroke="${INK}" stroke-width="1.5"/>
+    <line x1="942" y1="413" x2="942" y2="420" stroke="${INK}" stroke-width="2"/><line x1="950" y1="413" x2="950" y2="420" stroke="${INK}" stroke-width="2"/>
+  </g>`;
+  if (gapIn > 0) {
+    const x1 = sx + SASH_W, x2 = 874;
+    s += `<g opacity="${fade}"><line x1="${x1}" y1="24" x2="${x2}" y2="24" stroke="${ACC}" stroke-width="2"/>
+      <line x1="${x1}" y1="16" x2="${x1}" y2="32" stroke="${ACC}" stroke-width="2"/><line x1="${x2}" y1="16" x2="${x2}" y2="32" stroke="${ACC}" stroke-width="2"/>
+      <text x="${(x1+x2)/2}" y="14" font-size="15" font-weight="700" fill="${ACC}" text-anchor="middle">${gapIn} in open</text></g>`;
+  }
+  return s;
+}
+
+function render() {
+  const D = DESIGNS[state.d], t = state.t, e = state.e;
+  const sx = SASH_X0 - TRAVEL * t, A = sx + 100;
+  let s = `<defs><pattern id="mesh" width="6" height="6" patternUnits="userSpaceOnUse">
+     <rect width="6" height="6" fill="#f4f6f7"/><path d="M0 0 L6 0 M0 0 L0 6" stroke="#c9d0d4" stroke-width="1"/></pattern></defs>`;
+  s += windowSVG(sx, e);
+  // power cord to outlet
+  s += `<path d="M872 372 C905 372, 946 380, 946 404" fill="none" stroke="#555" stroke-width="2.5" opacity="${(1-e).toFixed(2)}"/>`;
+  const labelOp = Math.max(0, Math.min(1, (e - 0.55) / 0.35)).toFixed(2);
+  for (const p of D.parts) {
+    const dy = (rowY(p.row) - p.cy) * e;
+    const sel = state.sel === p.k ? ' sel' : '';
+    s += `<g class="part${sel}" data-k="${p.k}" transform="translate(0 ${dy.toFixed(1)})">${p.svg(A, t)}`;
+    const lx = p.lx(A);
+    s += `<text x="${lx}" y="${p.cy + 5}" font-size="${innerWidth < 640 ? 26 : 16}" font-weight="700" fill="${INK}" text-anchor="${p.left ? 'end' : 'start'}" opacity="${labelOp}">${p.n}</text></g>`;
+  }
+  const svgEl = document.getElementById('svg');
+  svgEl.setAttribute('viewBox', `0 0 1000 ${Math.round(450 + 330 * e)}`);
+  svgEl.innerHTML = s;
+}
+
+function setDesign(i) {
+  state.d = i; state.sel = null;
+  const D = DESIGNS[i];
+  document.getElementById('num').textContent = `${i+1}/4`;
+  document.getElementById('tagname').textContent = D.key;
+  document.getElementById('dots').innerHTML = DESIGNS.map((_, j) => `<span class="${j <= i ? 'on' : ''}"></span>`).join('');
+  document.querySelectorAll('.tabs button').forEach((b, j) => b.classList.toggle('on', j === i));
+  document.getElementById('dname').textContent = D.name;
+  document.getElementById('dhow').textContent = D.how;
+  document.getElementById('dgood').innerHTML = D.good.map(x => `<li>${x}</li>`).join('');
+  document.getElementById('dbad').innerHTML = D.bad.map(x => `<li>${x}</li>`).join('');
+  document.getElementById('info').innerHTML = '<h3>Tap a part</h3>Tap anything in the drawing to see what it does.';
+  render();
+}
+
+document.getElementById('tabs').innerHTML = DESIGNS.map((D, i) =>
+  `<button data-i="${i}">${D.name}<small>${D.sub}</small></button>`).join('');
+document.getElementById('tabs').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (b) setDesign(+b.dataset.i);
+});
+document.getElementById('svg').addEventListener('click', ev => {
+  const g = ev.target.closest('.part'); if (!g) return;
+  const p = DESIGNS[state.d].parts.find(x => x.k === g.dataset.k);
+  state.sel = p.k;
+  document.getElementById('info').innerHTML = `<h3>${p.n}</h3>${p.d}`;
+  render();
+});
+const openEl = document.getElementById('open'), expEl = document.getElementById('explode');
+openEl.addEventListener('input', () => { state.t = openEl.value / 1000; render(); });
+expEl.addEventListener('input', () => { state.e = expEl.value / 1000; render(); });
+
+let anim = null;
+document.getElementById('play').addEventListener('click', () => {
+  if (anim) cancelAnimationFrame(anim);
+  const from = state.t, to = from < 0.5 ? 1 : 0, dur = 2600, t0 = performance.now();
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur), ease = k < .5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2) / 2;
+    state.t = from + (to - from) * ease; openEl.value = Math.round(state.t * 1000); render();
+    if (k < 1) anim = requestAnimationFrame(step); else anim = null;
+  };
+  anim = requestAnimationFrame(step);
+});
+
+const q = new URLSearchParams(location.search);
+state.t = +(q.get('t') || 0); state.e = +(q.get('e') || 0);
+openEl.value = state.t * 1000; expEl.value = state.e * 1000;
+setDesign(+(q.get('d') || 0));
+</script>
+</body>
+</html>
